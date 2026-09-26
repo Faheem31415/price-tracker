@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
+
 import searchRouter from './routes/search.js';
 import productsRouter from './routes/products.js';
 import exportRouter from './routes/export.js';

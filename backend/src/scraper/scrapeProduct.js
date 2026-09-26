@@ -1,4 +1,28 @@
 import { chromium } from 'playwright';
+import { execSync } from 'child_process';
+import fs from 'fs';
+
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
+
+let browserInstallChecked = false;
+function ensureBrowserInstalled() {
+  if (browserInstallChecked) return;
+  browserInstallChecked = true;
+  try {
+    const p = chromium.executablePath();
+    if (!fs.existsSync(p)) {
+      console.log(`[scraper] Chromium binary missing at "${p}". Installing...`);
+      execSync('npx playwright install chromium', { stdio: 'inherit' });
+    }
+  } catch (err) {
+    console.log('[scraper] Chromium not found, running npx playwright install chromium...');
+    try {
+      execSync('npx playwright install chromium', { stdio: 'inherit' });
+    } catch (e) {
+      console.error('[scraper] Automated playwright install failed:', e.message);
+    }
+  }
+}
 
 const STORE_BASE_URL = process.env.STORE_BASE_URL || 'https://demo.inelabteamdev.com';
 
@@ -240,6 +264,8 @@ function parsePriceText(text) {
  * Never throws — always returns a structured result object.
  */
 export async function scrapeProduct(itemId, optionLabelText) {
+  ensureBrowserInstalled();
+
   const browser = await chromium.launch({
     headless: process.env.HEADED !== 'true',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
