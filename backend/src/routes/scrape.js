@@ -74,7 +74,7 @@ async function executeScrapeRun() {
  */
 router.post('/run', requireScrapeSecret, async (req, res) => {
   if (isScraping) {
-    return res.status(409).json({
+    return res.status(200).json({
       status: 'in_progress',
       message: 'A scrape run is already in progress'
     });
