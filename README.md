@@ -70,15 +70,10 @@ npm run dev
 ### 4. Deploy backend (Render)
 
 - New Web Service → connect the repo → root directory `backend`.
-- Build command: `npm install`
-- Start command: `npm start`
-- Add the same env vars as `.env.example` (with real values).
-- **Playwright on Render's free tier**: Chromium is heavy for a small
-  instance. `postinstall` runs `playwright install --with-deps chromium`
-  during build. If the free-tier build times out or the running instance
-  runs out of memory launching Chromium, that's a known free-tier
-  limitation — see `DESIGN_NOTES.md` for how this was handled/documented
-  rather than silently failing.
+- **Runtime**: Select **`Docker`** (Recommended for Playwright).
+  - Render will automatically use `backend/Dockerfile`, which uses Microsoft's official Playwright image with all Chromium libraries and Linux dependencies pre-baked (bypassing any root `su` permission issues).
+  - *Alternatively*, if using **Node** runtime: build command is `npm install` and start command is `npm start`.
+- Add the same env vars as `.env.example` (`DATABASE_URL`, `SCRAPE_SECRET`, `STORE_BASE_URL`, `CORS_ORIGIN`).
 
 ### 5. Deploy frontend (Vercel)
 
