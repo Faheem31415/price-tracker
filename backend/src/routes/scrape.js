@@ -26,48 +26,89 @@ function requireScrapeSecret(req, res, next) {
  * and exactly one scrape_attempts row is written per product per run,
  * success or failure.
  */
-router.post('/run', requireScrapeSecret, async (req, res) => {
+let isScraping = false;
+
+async function executeScrapeRun() {
   const startedAt = Date.now();
+  const trackedResult = await query('select * from tracked_products');
+  const tracked = trackedResult.rows;
 
-  try {
-    const trackedResult = await query('select * from tracked_products');
-    const tracked = trackedResult.rows;
+  const runResults = [];
 
-    const runResults = [];
+  for (const product of tracked) {
+    try {
+      console.log(`[scrape/run] scraping store_product_id=${product.store_product_id} option="${product.option_label}"`);
+      const { price, stock, outcome } = await scrapeProduct(product.store_product_id, product.option_label);
 
-    for (const product of tracked) {
-      try {
-        console.log(`[scrape/run] scraping store_product_id=${product.store_product_id} option="${product.option_label}"`);
-        const { price, stock, outcome } = await scrapeProduct(product.store_product_id, product.option_label);
+      await query(
+        `insert into scrape_attempts (store_product_id, product_name, option_label, price, stock, outcome)
+         values ($1, $2, $3, $4, $5, $6)`,
+        [product.store_product_id, product.product_name, product.option_label, price, stock, outcome]
+      );
 
-        await query(
-          `insert into scrape_attempts (store_product_id, product_name, option_label, price, stock, outcome)
-           values ($1, $2, $3, $4, $5, $6)`,
-          [product.store_product_id, product.product_name, product.option_label, price, stock, outcome]
-        );
+      runResults.push({ id: product.id, product_name: product.product_name, outcome });
+    } catch (err) {
+      console.error(`[scrape/run] unexpected error for product id=${product.id}`, err);
+      await query(
+        `insert into scrape_attempts (store_product_id, product_name, option_label, price, stock, outcome)
+         values ($1, $2, $3, null, null, 'failed')`,
+        [product.store_product_id, product.product_name, product.option_label]
+      ).catch((insertErr) => console.error('[scrape/run] failed to log failure row', insertErr));
 
-        runResults.push({ id: product.id, product_name: product.product_name, outcome });
-      } catch (err) {
-        // Should be rare — scrapeProduct() itself is designed not to throw —
-        // but if something unexpected happens, log a failed row rather than
-        // letting it silently vanish from the log.
-        console.error(`[scrape/run] unexpected error for product id=${product.id}`, err);
-        await query(
-          `insert into scrape_attempts (store_product_id, product_name, option_label, price, stock, outcome)
-           values ($1, $2, $3, null, null, 'failed')`,
-          [product.store_product_id, product.product_name, product.option_label]
-        ).catch((insertErr) => console.error('[scrape/run] failed to log failure row', insertErr));
-
-        runResults.push({ id: product.id, product_name: product.product_name, outcome: 'failed', error: err.message });
-      }
+      runResults.push({ id: product.id, product_name: product.product_name, outcome: 'failed', error: err.message });
     }
+  }
 
-    const durationMs = Date.now() - startedAt;
-    console.log(`[scrape/run] completed ${tracked.length} product(s) in ${durationMs}ms`);
-    res.json({ scraped: tracked.length, durationMs, results: runResults });
+  const durationMs = Date.now() - startedAt;
+  console.log(`[scrape/run] completed ${tracked.length} product(s) in ${durationMs}ms`);
+  return { scraped: tracked.length, durationMs, results: runResults };
+}
+
+/**
+ * POST /api/scrape/run
+ *
+ * Called by external cron (cron-job.org) or manual triggers.
+ * By default, returns immediately (HTTP 200) within ~50ms so free cron services
+ * with strict 30-second timeouts never fail, while the scrape continues in the background.
+ * Pass ?sync=true to block and wait for full results (useful for tests and Postman).
+ */
+router.post('/run', requireScrapeSecret, async (req, res) => {
+  if (isScraping) {
+    return res.status(409).json({
+      status: 'in_progress',
+      message: 'A scrape run is already in progress'
+    });
+  }
+
+  const isSync = req.query.sync === 'true';
+
+  if (!isSync) {
+    // Immediate response prevents cron-job.org 30s timeout
+    res.status(200).json({
+      status: 'started',
+      message: 'Scrape run started in background',
+      timestamp: new Date().toISOString()
+    });
+
+    isScraping = true;
+    executeScrapeRun()
+      .catch((err) => console.error('[scrape/run] background fatal error', err))
+      .finally(() => {
+        isScraping = false;
+      });
+    return;
+  }
+
+  // Synchronous execution (?sync=true)
+  isScraping = true;
+  try {
+    const result = await executeScrapeRun();
+    res.json(result);
   } catch (err) {
     console.error('[scrape/run] fatal error', err);
     res.status(500).json({ error: 'Scrape run failed', detail: err.message });
+  } finally {
+    isScraping = false;
   }
 });
 

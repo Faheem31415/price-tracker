@@ -54,7 +54,7 @@ async function run() {
 
   console.log('\n--- 3. Trigger live scrape run via POST /api/scrape/run ---');
   const t0 = Date.now();
-  const scrapeRes = await req('POST', '/api/scrape/run', null, {
+  const scrapeRes = await req('POST', '/api/scrape/run?sync=true', null, {
     'x-scrape-secret': SECRET,
   });
   const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
