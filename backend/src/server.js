@@ -11,7 +11,19 @@ import scrapeRouter from './routes/scrape.js';
 
 dotenv.config();
 
+// Never let an unhandled crash take the whole process down mid-request —
+// on Render that would make in-flight responses (including cron-job.org's
+// scrape trigger) come back as a platform-level "Application error" page,
+// which is large HTML and would independently trigger "output too large".
+process.on('unhandledRejection', (err) => {
+  console.error('[server] unhandledRejection', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException', err);
+});
+
 const app = express();
+app.disable('x-powered-by');
 
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -49,7 +61,10 @@ app.use('/api/scrape', scrapeRouter);
 
 app.use((err, req, res, next) => {
   console.error('[server] unhandled error', err);
-  res.status(500).json({ error: 'Internal server error' });
+  if (res.headersSent) return next(err);
+  // Keep this short and generic on purpose — no stack traces, no verbose
+  // JSON — so no route can ever return an oversized error body.
+  res.status(500).type('text/plain').send('ERROR');
 });
 
 const PORT = process.env.PORT || 4000;
