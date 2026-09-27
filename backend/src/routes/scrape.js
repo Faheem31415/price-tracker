@@ -5,7 +5,7 @@ import { scrapeProduct } from '../scraper/scrapeProduct.js';
 const router = Router();
 
 function requireScrapeSecret(req, res, next) {
-  const provided = req.header('x-scrape-secret');
+  const provided = req.header('x-scrape-secret') || req.query.secret;
   if (!process.env.SCRAPE_SECRET) {
     console.error('[scrape] SCRAPE_SECRET is not configured on the server');
     return res.status(500).json({ error: 'Server misconfigured: SCRAPE_SECRET not set' });
@@ -65,30 +65,27 @@ async function executeScrapeRun() {
 }
 
 /**
- * POST /api/scrape/run
+ * POST or GET /api/scrape/run
  *
  * Called by external cron (cron-job.org) or manual triggers.
- * By default, returns immediately (HTTP 200) within ~50ms so free cron services
- * with strict 30-second timeouts never fail, while the scrape continues in the background.
+ * By default, returns immediately (HTTP 200) with a minimal plain-text response
+ * and Connection: close so free cron services with strict buffer limits (4KB)
+ * and 30-second timeouts never fail, while the scrape continues in the background.
  * Pass ?sync=true to block and wait for full results (useful for tests and Postman).
  */
-router.post('/run', requireScrapeSecret, async (req, res) => {
+const handleScrapeRun = async (req, res) => {
   if (isScraping) {
-    return res.status(200).json({
-      status: 'in_progress',
-      message: 'A scrape run is already in progress'
-    });
+    res.set('Connection', 'close');
+    return res.status(200).type('text/plain').send('IN_PROGRESS');
   }
 
   const isSync = req.query.sync === 'true';
 
   if (!isSync) {
-    // Immediate response prevents cron-job.org 30s timeout
-    res.status(200).json({
-      status: 'started',
-      message: 'Scrape run started in background',
-      timestamp: new Date().toISOString()
-    });
+    // Send minimal plain-text response and close socket immediately to prevent
+    // cron-job.org 4KB buffer overflow and 30s timeout issues
+    res.set('Connection', 'close');
+    res.status(200).type('text/plain').send('OK');
 
     isScraping = true;
     executeScrapeRun()
@@ -110,6 +107,9 @@ router.post('/run', requireScrapeSecret, async (req, res) => {
   } finally {
     isScraping = false;
   }
-});
+};
+
+router.post('/run', requireScrapeSecret, handleScrapeRun);
+router.get('/run', requireScrapeSecret, handleScrapeRun);
 
 export default router;
